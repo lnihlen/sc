@@ -1,10 +1,12 @@
+~pattern.play;
+
 (
 ~quit = false;
 ~cond = Condition.new(false);
 ~cleanup = EventStreamCleanup.new;
 ~pattern = 	Pbind(
 	\scale, Scale.chromatic,
-	\octave, 3,
+	\octave, 4,
 	\root, 0,  // key of C
 	\amp, 1.0,
 	\degree, Pseq([-1,   0,   \rest, 0,   -1,   0,   \rest, 0,   -1,   0,    \rest, 0,   1,   0,   -1 ], inf),
@@ -21,7 +23,7 @@
 ~last_tap = nil;
 
 MIDIIn.connectAll;
-~midi_port = MIDIIn.findPort("Logidy UMI3", "Logidy UMI3");
+~midi_port = MIDIIn.findPort("Logidy UMI3", "Logidy UMI3 MIDI 1");
 if (~midi_port.notNil, {
 	~midi_func = MIDIFunc.noteOn({ | value, number, channel, source_id |
 		var tap_time = Process.monotonicClockTime;
@@ -55,11 +57,13 @@ if (~midi_port.notNil, {
 			~tap_time_deltas.do({ | x | sum = sum + x; });
 			~period = sum / ~tap_time_deltas.size.asFloat;
 			sum = 0.0;
-			~tap_time_deltas.do({ | x | sum = (mean - x).squared + sum; });
-
+			~tap_time_deltas.do({ | x | sum = (~period - x).squared + sum; });
+			~range = sum / (~tap_time_deltas.size.asFloat - 1.0);
 		});
 
 	});
+}, {
+	"unable to find MIDI controller.".postln;
 });
 
 // For every tap pulse train we compute mean, std_dev period between taps based on weighted
@@ -93,13 +97,14 @@ fork {
 	var beat_number = 0;
 
 	current_event = ~stream.next(());
+	current_event.dur = current_event.dur * ~period;
 
 	while ({~quit.not}, {
 		// If the current event has a remaining_time > 1
 		// we take no action this iteration. Otherwise we
 		// can assume next event takes place within this
 		// beat.
-		while ( { remaining_time < 1.0 }, {
+		while ({ remaining_time < ~period }, {
 			if (current_event.isRest.not, {
 				if (remaining_time == 0.0, {
 					current_event.play();
@@ -110,6 +115,7 @@ fork {
 			});
 			remaining_time = remaining_time + current_event.dur;
 			current_event = ~stream.next(());
+			current_event.dur = current_event.dur * ~period;
 		});
 
 		remaining_time = remaining_time - 1.0;
