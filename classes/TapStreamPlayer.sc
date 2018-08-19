@@ -84,7 +84,8 @@ TapStreamPlayer {
 		condition.signal;
 	}
 
-	start {
+	start { | event_proto |
+		if (event_proto.isNil, { event_proto = (); });
 		// ** Enforce pre-requisites: period, range valid, stream valid.
 
 		if (streamer_task.notNil, { streamer_task.stop; });
@@ -120,7 +121,7 @@ TapStreamPlayer {
 			var delta = 0.0;
 			var beat_number = 0;
 
-			current_event = stream.next(());
+			current_event = stream.next(event_proto);
 
 			while ({ quit.not; }, {
 				// We schedule musical events one beat at a time. Since musical events can occur
@@ -137,7 +138,7 @@ TapStreamPlayer {
 						SystemClock.sched(remaining_time * period, { e.play(); });
 					});
 					remaining_time = remaining_time + current_event.dur;
-					current_event = stream.next(());
+					current_event = stream.next(event_proto);
 				});
 
 				remaining_time = remaining_time - 1.0;
