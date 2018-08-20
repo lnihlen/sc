@@ -1,11 +1,10 @@
 (
 MIDIClient.init;
-~midi_out = MIDIOut.newByName("Moog Minitaur", "Moog Minitaur MIDI 1");
-~midi_out.connect(1);
+~midi_out = MIDIOut.newByName("Moog Minitaur", "Moog Minitaur MIDI 1").connect;
 
 ~pattern = 	Pbind(
 	\scale, Scale.chromatic,
-	\octave, 4,
+	\octave, 3,
 	\root, 0,  // key of C
 	\amp, 1.0,
 	\degree, Pseq([-1,   0,   \rest, 0,   -1,   0,   \rest, 0,   -1,   0,    \rest, 0,   1,   0,   -1 ], inf),
@@ -28,21 +27,20 @@ MIDIClient.init;
 			\midicmd: \noteOn,
 			\chan: 16));
 		~playing = true;
-	));
-	"new period: % %\n".postf(p, s);
+	});
 };
 )
 
-~midi_out.noteOn(25);
+~midi_out.allNotesOff(0);
 
 (
 Pbind(
 	\type, \midi,
 	\midiout, ~midi_out,
 	\midicmd, \noteOn,
-	\chan, 1,
+	\chan, 0,  // note that these seem to come out on channel 1
 	\scale, Scale.chromatic,
-	\octave, 1,
+	\octave, 3,
 	\root, 0,  // key of C
 	\amp, 1.0,
 	\degree, Pseq([-1,   0,   \rest, 0,   -1,   0,   \rest, 0,   -1,   0,    \rest, 0,   1,   0,   -1 ], inf),
