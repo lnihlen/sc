@@ -22,10 +22,10 @@
 OortShow {
 	// Currently using the LiDiVi MIDI->USB interface for the FC-300, so it
 	// shows up as this very generic name.
-	classvar fc_300_midi_name = "USB MIDI Interface";
+	const fc_300_midi_name = "USB MIDI Interface";
 	// Until Minitaur is ready using the Bitwig synth on Apple MIDI bus.
-	classvar minitaur_midi_device_name = "IAC Driver";
-	classvar minitaur_midi_port_name = "IAC Bus 1";
+	const minitaur_midi_device_name = "IAC Driver";
+	const minitaur_midi_port_name = "IAC Bus 1";
 
 	var <>tap_tempo;
 	var <>songs;
