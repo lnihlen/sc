@@ -3,8 +3,6 @@
 
 // First draft Luke Nihlen, luke.nihlen@gmail.com, 28 October 2018.
 SCLOrkChat {
-	// How many lines to keep in the chat log before deleting the older
-	// elements.
 	const peerListUpdatePeriodSeconds = 1;
 	const chatTextUpdatePeriodSeconds = 0.2;
 	const fontSizePoints = 18;
@@ -35,6 +33,7 @@ SCLOrkChat {
 	var chatTextQueueSemaphore;
 	var chatTextQueue;
 	var sentTextSerial;
+	var textModePrepend;
 	var sendersSerialDict;
 
 	// Variables to keep track of the incoming and outgoing users, for
@@ -48,7 +47,7 @@ SCLOrkChat {
 	init { | name = nil, asDirector = false |
 		// Initialize Utopia objects first.
 		addrBook = AddrBook.new;
-		me = this.prGenerateUniquePeer(name);
+		me = this.prGenerateUniquePeer(name, asDirector);
 		hail = Hail.new(addrBook, me: me);
 		chatter = Chatter.new(addrBook, post: false);
 
@@ -83,9 +82,12 @@ SCLOrkChat {
 	// Use username, hostname, epoch, and a large hardware random seed to try and
 	// crock up a Peer name for Utopia that has near certain probability of being
 	// unique within the AddrBook.
-	prGenerateUniquePeer { | name = nil |
+	prGenerateUniquePeer { | name = nil, asDirector = false |
 		if (name.isNil, {
 			name = Pipe.new("whoami", "r").getLine;
+		});
+		if (asDirector, {
+			name = name + "[D]";
 		});
 		name = name ++ "|" ++ Pipe.new("uname -n", "r").getLine;
 		name = name ++ "|" ++ Date.getDate.stamp ++ "|";
@@ -193,7 +195,7 @@ SCLOrkChat {
 							this.prAppendChatItalics(text ++ "\n");
 						},
 						\director, {
-							// ??
+							this.prAppendChatColor(who ++ ": " ++ text ++ "\n", Color.green);
 						}
 					).value;
 
@@ -253,43 +255,53 @@ SCLOrkChat {
 		chatter.addDependant({ | chatter, what, who, chat |
 			// Supress local chat echo, as we add local chat to UI on send.
 			if (who != me.name, {
-				var serial, splitChat, shouldSend, storedSerial;
-				shouldSend = false;
+				// We prepend a serial number to each message sent to workaround
+				// a problem where multiple Chatter instances running on the same
+				// computer each will receive one copy of all inbound messages for
+				// all each instance running on the same computer. So if you have n
+				// chat windows open on the same computer, you will recieve n copies
+				// of each chat. I suspect this is due to the way that all of the
+				// Chatter objects are binding to the same oscPath, but I haven't
+				// researched in depth. On the reciever side we keep a dictionary
+				// of received serial numbers, and only append new text when it has
+				// a novel serial number.
+				var serial, splitChat, shouldAdd, storedSerial;
+				shouldAdd = false;
 
 				splitChat = chat.asString.split($|);
 				serial = splitChat[0].asInteger;
-
 				storedSerial = sendersSerialDict.at(who);
 				if (storedSerial.isNil, {
-					shouldSend = true;
+					shouldAdd = true;
 				}, {
-					shouldSend = storedSerial < serial;
+					shouldAdd = storedSerial < serial;
 				});
 
-				if (shouldSend, {
+				if (shouldAdd, {
+					var mode;
 					sendersSerialDict.put(who, serial);
+					if (splitChat[1] == "D", {
+						mode = \director;
+					}, {
+						mode = \normal;
+					});
+					// Remove serial number and director mode flags from what
+					// gets printed.
+					splitChat.removeAt(0);
 					splitChat.removeAt(0);
 					this.prAddChatLine(splitChat.join("|"),
 						this.prHumanReadablePeer(addrBook.at(who)),
-						\normal);
+						mode);
 				});
 			});
 		});
 
 		sentTextSerial = 0;
+		if (directorMode, { textModePrepend = "|D|" }, { textModePrepend = "|P|" });
+
 		sendTextField.action_({ | v |
 			this.prAddChatLine(v.string, this.prHumanReadablePeer(me), \echo);
-			// We prepend a serial number to each message sent to workaround
-			// a problem where multiple Chatter instances running on the same
-			// computer each will receive one copy of all inbound messages for
-			// all each instance running on the same computer. So if you have n
-			// chat windows open on the same computer, you will recieve n copies
-			// of each chat. I suspect this is due to the way that all of the
-			// Chatter objects are binding to the same oscPath, but I haven't
-			// researched in depth. On the reciever side we keep a dictionary
-			// of received serial numbers, and only append new text when it has
-			// a novel serial number.
-			chatter.send(sentTextSerial.asString ++ "|" ++ v.string);
+			chatter.send(sentTextSerial.asString ++ textModePrepend ++ v.string);
 			sentTextSerial = sentTextSerial + 1;
 			v.string = ""
 		});
