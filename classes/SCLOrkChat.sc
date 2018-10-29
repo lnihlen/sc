@@ -34,20 +34,21 @@ SCLOrkChat {
 	var updateChatTextTask;
 	var chatTextQueueSemaphore;
 	var chatTextQueue;
-	var lastTextDict;
+	var sentTextSerial;
+	var sendersSerialDict;
 
 	// Variables to keep track of the incoming and outgoing users, for
 	// appropriate animation of UI elements.
 	var updatePeersTask;
 
-	*new { | asDirector = false |
-		^super.new.init(asDirector);
+	*new { | name = nil, asDirector = false |
+		^super.new.init(name, asDirector);
 	}
 
-	init { | asDirector = false |
+	init { | name = nil, asDirector = false |
 		// Initialize Utopia objects first.
 		addrBook = AddrBook.new;
-		me = this.prGenerateUniquePeer;
+		me = this.prGenerateUniquePeer(name);
 		hail = Hail.new(addrBook, me: me);
 		chatter = Chatter.new(addrBook, post: false);
 
@@ -82,12 +83,12 @@ SCLOrkChat {
 	// Use username, hostname, epoch, and a large hardware random seed to try and
 	// crock up a Peer name for Utopia that has near certain probability of being
 	// unique within the AddrBook.
-	prGenerateUniquePeer {
-		var line, name;
-		line = Pipe.new("whoami", "r").getLine;
-		name = line ++ "|";
-		line = Pipe.new("uname -n", "r").getLine;
-		name = name ++ line ++ "|" ++ Date.getDate.stamp ++ "|";
+	prGenerateUniquePeer { | name = nil |
+		if (name.isNil, {
+			name = Pipe.new("whoami", "r").getLine;
+		});
+		name = name ++ "|" ++ Pipe.new("uname -n", "r").getLine;
+		name = name ++ "|" ++ Date.getDate.stamp ++ "|";
 		File.use("/dev/urandom", "rb", { | file |
 			8.do({
 				var word = file.getInt32;
@@ -224,11 +225,11 @@ SCLOrkChat {
 				// Make system announcements for each arrival and departure.
 				leavingPeerSet.do({ | peer |
 					peerChange = true;
-					this.prAddChatLine(this.prHumanReadablePeer(peer) +
+					this.prAddChatLine("User" + this.prHumanReadablePeer(peer) +
 						"has left the Hail.", nil, \system) });
 				arrivingPeerSet.do({ | peer |
 					peerChange = true;
-					this.prAddChatLine(this.prHumanReadablePeer(peer) +
+					this.prAddChatLine("User" + this.prHumanReadablePeer(peer) +
 						"has arrived in the Hail.", nil, \system) });
 
 				if (peerChange, {
@@ -247,21 +248,49 @@ SCLOrkChat {
 
 	prConnectChatterToUI {
 		// First wire up reception of messages, so we listen before we speak :).
+		sendersSerialDict = Dictionary.new;
+
 		chatter.addDependant({ | chatter, what, who, chat |
 			// Supress local chat echo, as we add local chat to UI on send.
 			if (who != me.name, {
-				// KNOWN ISSUE: Multiple instances of Chatter running on the same
-				// computer will result in duplicate reception by each Chatter
-				// instance of the message.
-				this.prAddChatLine(chat,
-					this.prHumanReadablePeer(addrBook.at(who)),
-					\normal);
+				var serial, splitChat, shouldSend, storedSerial;
+				shouldSend = false;
+
+				splitChat = chat.asString.split($|);
+				serial = splitChat[0].asInteger;
+
+				storedSerial = sendersSerialDict.at(who);
+				if (storedSerial.isNil, {
+					shouldSend = true;
+				}, {
+					shouldSend = storedSerial < serial;
+				});
+
+				if (shouldSend, {
+					sendersSerialDict.put(who, serial);
+					splitChat.removeAt(0);
+					this.prAddChatLine(splitChat.join("|"),
+						this.prHumanReadablePeer(addrBook.at(who)),
+						\normal);
+				});
 			});
 		});
 
+		sentTextSerial = 0;
 		sendTextField.action_({ | v |
 			this.prAddChatLine(v.string, this.prHumanReadablePeer(me), \echo);
-			chatter.send(v.string);
+			// We prepend a serial number to each message sent to workaround
+			// a problem where multiple Chatter instances running on the same
+			// computer each will receive one copy of all inbound messages for
+			// all each instance running on the same computer. So if you have n
+			// chat windows open on the same computer, you will recieve n copies
+			// of each chat. I suspect this is due to the way that all of the
+			// Chatter objects are binding to the same oscPath, but I haven't
+			// researched in depth. On the reciever side we keep a dictionary
+			// of received serial numbers, and only append new text when it has
+			// a novel serial number.
+			chatter.send(sentTextSerial.asString ++ "|" ++ v.string);
+			sentTextSerial = sentTextSerial + 1;
 			v.string = ""
 		});
 	}
