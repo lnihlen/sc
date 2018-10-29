@@ -5,23 +5,36 @@
 SCLOrkChat {
 	const peerListUpdatePeriodSeconds = 1;
 	const chatTextUpdatePeriodSeconds = 0.2;
+	const tempoUpdatePeriodSeconds = 0.1;
 	const fontSizePoints = 18;
 	// Typically make this some multiple of the fontSizePoints, so specify
 	// it that way so the compiler doesn't freak out defining one constant
 	// in terms of another.
 	const peerListMaxWidthPointMultiple = 8;
+	const windowDefaultWidthPointMultiple = 30;
+	const windowDefaultHeightPointMultiple = 40;
+	const minBeaconClockTempo = 10;
+	const maxBeaconClockTempo = 180;
 
 	// Utopia variables.
-	var <>addrBook;
+	var <addrBook;
 	var me;
 	var hail;
 	var chatter;
+	var <beaconClock;
 
 	// Windowing-specific variables.
 	var directorMode;
 	var window;
 	var chatTextView;
 	var peerListView;
+	var beaconClockTempoKnob;
+	var beaconClockTempoKnobValueLabel;
+	var beaconClockSetTempoButton;
+	var beaconClockFadeTempoButton;
+	var beaconClockWarpTempoButton;
+	var beaconClockGlobalTempoValueLabel;
+	var beaconClockTempoUpdateTask;
 	var sendTextField;
 	var defaultFont;
 	var boldFont;
@@ -50,14 +63,19 @@ SCLOrkChat {
 		me = this.prGenerateUniquePeer(name, asDirector);
 		hail = Hail.new(addrBook, me: me);
 		chatter = Chatter.new(addrBook, post: false);
+		beaconClock = BeaconClock.new(addrBook);
+
+		directorMode = asDirector;
+		if (directorMode, {
+			beaconClock.setGlobalTempo(80 / 60);
+		});
 
 		// Now construct user-facing objects and GUI.
-		directorMode = asDirector;
-
 		this.prConstructUIElements();
 		this.prConnectChatTextUpdateLogic();
 		this.prConnectPeerUpdateLogic();
 		this.prConnectChatterToUI();
+		this.prConnectBeaconClockToUI();
 
 		window.front;
 	}
@@ -65,9 +83,11 @@ SCLOrkChat {
 	free {
 		updateChatTextTask.stop.free;
 		updatePeersTask.stop.free;
+		beaconClockTempoUpdateTask.stop.free;
 		window.close;
 
 		// Tear down Utopia Objects.
+		beaconClock.free;
 		chatter.free;
 		hail.free;
 		addrBook.free;
@@ -117,19 +137,69 @@ SCLOrkChat {
 	}
 
 	prConstructUIElements {
-		window = Window.new("chat -" + this.prHumanReadablePeer(me));
+		var beaconClockCompositeView;
+		var beaconClockLabel;
+		var beaconClockGlobalValueLabel;
+		var bcWidth = peerListMaxWidthPointMultiple * fontSizePoints;
+		var pad = 4;
+		var bcHeight = fontSizePoints + (pad * 3);
+
+		window = Window.new("chat -" + this.prHumanReadablePeer(me),
+			Rect.new(0, 0,
+				windowDefaultWidthPointMultiple * fontSizePoints,
+				windowDefaultHeightPointMultiple * fontSizePoints)
+		);
 		window.alwaysOnTop = true;
 		window.userCanClose = false;
 		window.layout = VLayout.new(
 			HLayout.new(
 				chatTextView = TextView.new(),
-				peerListView = ListView.new().maxWidth_(
-					peerListMaxWidthPointMultiple * fontSizePoints)
+				peerListView = ListView.new().maxWidth_(bcWidth),
+				beaconClockCompositeView = CompositeView.new().maxWidth_(
+					bcWidth).minWidth_(bcWidth)
 			),
 			HLayout.new(
 				sendTextField = TextField.new()
 			)
 		);
+
+		beaconClockCompositeView.background = Color.new(0.9, 0.9, 0.9);
+
+		// Construct BeaconClock view outside of layout structure, to avoid
+		// having internal UI components stretched by the LayoutViews.
+		beaconClockLabel = StaticText.new(beaconClockCompositeView,
+			Rect.new(pad, pad, bcWidth - (2 * pad), fontSizePoints));
+		beaconClockLabel.string = "BeaconClock";
+		beaconClockLabel.align = \center;
+		beaconClockTempoKnob = Knob.new(beaconClockCompositeView,
+			Rect.new(pad, beaconClockLabel.bounds.bottom + pad,
+				bcWidth - (2 * pad), bcWidth));
+		beaconClockTempoKnobValueLabel = StaticText.new(beaconClockCompositeView,
+			Rect.new(pad, beaconClockTempoKnob.bounds.bottom - (2 * pad),  // Pull in a little.
+				bcWidth - (2 * pad), bcHeight - pad));
+		beaconClockTempoKnobValueLabel.string = "unknown";
+		beaconClockTempoKnobValueLabel.align = \center;
+		beaconClockSetTempoButton = Button.new(beaconClockCompositeView,
+			Rect.new(pad, beaconClockTempoKnobValueLabel.bounds.bottom + pad,
+				bcWidth - (2 * pad), bcHeight));
+		beaconClockSetTempoButton.string = "Set Tempo";
+		beaconClockFadeTempoButton = Button.new(beaconClockCompositeView,
+			Rect.new(pad, beaconClockSetTempoButton.bounds.bottom + pad,
+				bcWidth - (2 * pad), bcHeight));
+		beaconClockFadeTempoButton.string = "Fade Tempo";
+		beaconClockWarpTempoButton = Button.new(beaconClockCompositeView,
+			Rect.new(pad, beaconClockFadeTempoButton.bounds.bottom + pad,
+				bcWidth - (2 * pad), bcHeight));
+		beaconClockWarpTempoButton.string = "Warp Tempo";
+		beaconClockGlobalValueLabel = StaticText.new(beaconClockCompositeView,
+			Rect.new(pad, beaconClockWarpTempoButton.bounds.bottom + pad,
+				bcWidth - (2 * pad), bcHeight));
+		beaconClockGlobalValueLabel.string = "Global Tempo:";
+		beaconClockGlobalTempoValueLabel = StaticText.new(beaconClockCompositeView,
+			Rect.new(pad, beaconClockGlobalValueLabel.bounds.bottom + pad,
+				bcWidth - (2 * pad), bcHeight));
+		beaconClockGlobalTempoValueLabel.string = "unknown";
+		beaconClockGlobalTempoValueLabel.align = \center;
 
 		defaultFont = Font.new(Font.defaultSansFace, fontSizePoints, false, false);
 		boldFont = Font.new(Font.defaultSansFace, fontSizePoints, true, false);
@@ -305,5 +375,38 @@ SCLOrkChat {
 			sentTextSerial = sentTextSerial + 1;
 			v.string = ""
 		});
+	}
+
+	prConvertKnobToTempo {
+		^(minBeaconClockTempo + (beaconClockTempoKnob.value *
+			(maxBeaconClockTempo - minBeaconClockTempo)));
+	}
+
+	prConnectBeaconClockToUI {
+		beaconClockTempoKnob.action = { | v |
+			beaconClockTempoKnobValueLabel.string =
+			this.prConvertKnobToTempo().asInteger.asString;
+		};
+		beaconClockTempoKnob.valueAction = 0.2;
+
+		beaconClockSetTempoButton.action = { | v |
+			beaconClock.setGlobalTempo(this.prConvertKnobToTempo() / 60.0);
+		};
+
+		beaconClockFadeTempoButton.action = { | v |
+			beaconClock.fadeTempo(this.prConvertKnobToTempo() / 60.0);
+		};
+
+		beaconClockWarpTempoButton.action = { | v |
+			beaconClock.warpTempo(this.prConvertKnobToTempo() / 60.0);
+		};
+
+		beaconClockTempoUpdateTask = Task.new({
+			while ({ true }, {
+				beaconClockGlobalTempoValueLabel.string =
+				(beaconClock.tempo * 60.0).asInteger.asString;
+				tempoUpdatePeriodSeconds.wait;
+			});
+		}, AppClock).start;
 	}
 }
