@@ -219,6 +219,7 @@ SCLOrkChat {
 		chatTextView.setString(text, currentStringSize, 0);
 		chatTextView.setStringColor(color, currentStringSize, text.size);
 		chatTextView.setFont(defaultFont, currentStringSize, text.size);
+		chatTextView.select(chatTextView.string.size, 0);
 	}
 
 	prAppendChatBold { | text |
@@ -226,6 +227,7 @@ SCLOrkChat {
 		chatTextView.setString(text, currentStringSize, 0);
 		chatTextView.setStringColor(Color.black, currentStringSize, text.size);
 		chatTextView.setFont(boldFont, currentStringSize, text.size);
+		chatTextView.select(chatTextView.string.size, 0);
 	}
 
 	prAppendChatItalics { | text |
@@ -233,6 +235,7 @@ SCLOrkChat {
 		chatTextView.setString(text, currentStringSize, 0);
 		chatTextView.setStringColor(Color.black, currentStringSize, text.size);
 		chatTextView.setFont(italicsFont, currentStringSize, text.size);
+		chatTextView.select(chatTextView.string.size, 0);
 	}
 
 	prConnectChatTextUpdateLogic {
