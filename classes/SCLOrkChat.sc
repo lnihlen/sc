@@ -3,16 +3,16 @@
 
 // First draft Luke Nihlen, luke.nihlen@gmail.com, 28 October 2018.
 SCLOrkChat {
-	const peerListUpdatePeriodSeconds = 1;
+	const chatVersionString = "v0.2";
+	const peerListUpdatePeriodSeconds = 0.5;
 	const chatTextUpdatePeriodSeconds = 0.2;
 	const tempoUpdatePeriodSeconds = 0.1;
-	const fontSizePoints = 18;
+	const fontSizePoints = 16;
 	// Typically make this some multiple of the fontSizePoints, so specify
 	// it that way so the compiler doesn't freak out defining one constant
 	// in terms of another.
-	const peerListMaxWidthPointMultiple = 8;
-	const windowDefaultWidthPointMultiple = 30;
-	const windowDefaultHeightPointMultiple = 40;
+	const peerListMaxWidthPointMultiple = 10;
+	const windowDefaultWidthPointMultiple = 40;
 	const minBeaconClockTempo = 10;
 	const maxBeaconClockTempo = 180;
 
@@ -21,7 +21,7 @@ SCLOrkChat {
 	var me;
 	var hail;
 	var chatter;
-	var <beaconClock;
+	var <beaconClock = nil;
 
 	// Windowing-specific variables.
 	var directorMode;
@@ -33,8 +33,9 @@ SCLOrkChat {
 	var beaconClockSetTempoButton;
 	var beaconClockFadeTempoButton;
 	var beaconClockWarpTempoButton;
-	var beaconClockGlobalTempoValueLabel;
-	var beaconClockTempoUpdateTask;
+	var beaconClockTempoValueLabel;
+	var beaconClockStatusUpdateTask;
+	var restartClockButton;
 	var sendTextField;
 	var defaultFont;
 	var boldFont;
@@ -49,12 +50,24 @@ SCLOrkChat {
 	var textModePrepend;
 	var sendersSerialDict;
 
-	// Variables to keep track of the incoming and outgoing users, for
-	// appropriate animation of UI elements.
 	var updatePeersTask;
+	var quitTasks;
+
+	var currentPeerSet;
+	var nextPeerSet;
+	var leavingPeerSet;
+	var arrivingPeerSet;
+	var peerChange;
 
 	*new { | name = nil, asDirector = false |
 		^super.new.init(name, asDirector);
+	}
+
+	cmdPeriod {
+		if (beaconClock.notNil, {
+			beaconClock.stop.free;
+			beaconClock = nil;
+		});
 	}
 
 	init { | name = nil, asDirector = false |
@@ -63,12 +76,10 @@ SCLOrkChat {
 		me = this.prGenerateUniquePeer(name, asDirector);
 		hail = Hail.new(addrBook, me: me);
 		chatter = Chatter.new(addrBook, post: false);
-		beaconClock = BeaconClock.new(addrBook);
-
 		directorMode = asDirector;
-		if (directorMode, {
-			beaconClock.setGlobalTempo(80 / 60);
-		});
+		CmdPeriod.add(this);
+		quitTasks = false;
+		currentPeerSet = Set.new;
 
 		// Now construct user-facing objects and GUI.
 		this.prConstructUIElements();
@@ -76,18 +87,22 @@ SCLOrkChat {
 		this.prConnectPeerUpdateLogic();
 		this.prConnectChatterToUI();
 		this.prConnectBeaconClockToUI();
+		this.prStartBeaconClock();
 
 		window.front;
 	}
 
 	free {
+		quitTasks = true;
+		CmdPeriod.remove(this);
+
 		updateChatTextTask.stop.free;
 		updatePeersTask.stop.free;
-		beaconClockTempoUpdateTask.stop.free;
+		beaconClockStatusUpdateTask.stop.free;
 		window.close;
 
 		// Tear down Utopia Objects.
-		beaconClock.free;
+		beaconClock.stop;
 		chatter.free;
 		hail.free;
 		addrBook.free;
@@ -139,15 +154,16 @@ SCLOrkChat {
 	prConstructUIElements {
 		var beaconClockCompositeView;
 		var beaconClockLabel;
-		var beaconClockGlobalValueLabel;
 		var bcWidth = peerListMaxWidthPointMultiple * fontSizePoints;
+		var bcWidthPad = bcWidth - (2 * pad);
 		var pad = 4;
 		var bcHeight = fontSizePoints + (pad * 3);
 
-		window = Window.new("chat -" + this.prHumanReadablePeer(me),
-			Rect.new(0, 0,
+		window = Window.new(
+			"chat" + chatVersionString + "-" + this.prHumanReadablePeer(me),
+			Rect.new(Window.screenBounds.right - windowDefaultWidthPointMultiple * fontSizePoints, 0,
 				windowDefaultWidthPointMultiple * fontSizePoints,
-				windowDefaultHeightPointMultiple * fontSizePoints)
+				Window.screenBounds.height)
 		);
 		window.alwaysOnTop = true;
 		window.userCanClose = false;
@@ -168,38 +184,40 @@ SCLOrkChat {
 		// Construct BeaconClock view outside of layout structure, to avoid
 		// having internal UI components stretched by the LayoutViews.
 		beaconClockLabel = StaticText.new(beaconClockCompositeView,
-			Rect.new(pad, pad, bcWidth - (2 * pad), fontSizePoints));
+			Rect.new(pad, pad, bcWidthPad, fontSizePoints));
 		beaconClockLabel.string = "BeaconClock";
 		beaconClockLabel.align = \center;
-		beaconClockTempoKnob = Knob.new(beaconClockCompositeView,
+		beaconClockTempoValueLabel = StaticText.new(beaconClockCompositeView,
 			Rect.new(pad, beaconClockLabel.bounds.bottom + pad,
-				bcWidth - (2 * pad), bcWidth));
+				bcWidthPad, bcHeight));
+		beaconClockTempoValueLabel.string = "stopped";
+		beaconClockTempoValueLabel.align = \center;
+		beaconClockTempoValueLabel.background = Color.new(0, 0, 0);
+		beaconClockTempoValueLabel.stringColor = Color.new(1, 1, 1);
+		restartClockButton = Button.new(beaconClockCompositeView,
+			Rect.new(pad, beaconClockTempoValueLabel.bounds.bottom + pad,
+				bcWidthPad, bcHeight));
+		restartClockButton.string = "Restart Clock";
+		beaconClockTempoKnob = Knob.new(beaconClockCompositeView,
+			Rect.new(pad, restartClockButton.bounds.bottom + pad,
+				bcWidthPad, bcWidth));
 		beaconClockTempoKnobValueLabel = StaticText.new(beaconClockCompositeView,
 			Rect.new(pad, beaconClockTempoKnob.bounds.bottom - (2 * pad),  // Pull in a little.
-				bcWidth - (2 * pad), bcHeight - pad));
+				bcWidthPad, bcHeight - pad));
 		beaconClockTempoKnobValueLabel.string = "unknown";
 		beaconClockTempoKnobValueLabel.align = \center;
 		beaconClockSetTempoButton = Button.new(beaconClockCompositeView,
 			Rect.new(pad, beaconClockTempoKnobValueLabel.bounds.bottom + pad,
-				bcWidth - (2 * pad), bcHeight));
+				bcWidthPad, bcHeight));
 		beaconClockSetTempoButton.string = "Set Tempo";
 		beaconClockFadeTempoButton = Button.new(beaconClockCompositeView,
 			Rect.new(pad, beaconClockSetTempoButton.bounds.bottom + pad,
-				bcWidth - (2 * pad), bcHeight));
+				bcWidthPad, bcHeight));
 		beaconClockFadeTempoButton.string = "Fade Tempo";
 		beaconClockWarpTempoButton = Button.new(beaconClockCompositeView,
 			Rect.new(pad, beaconClockFadeTempoButton.bounds.bottom + pad,
-				bcWidth - (2 * pad), bcHeight));
+				bcWidthPad, bcHeight));
 		beaconClockWarpTempoButton.string = "Warp Tempo";
-		beaconClockGlobalValueLabel = StaticText.new(beaconClockCompositeView,
-			Rect.new(pad, beaconClockWarpTempoButton.bounds.bottom + pad,
-				bcWidth - (2 * pad), bcHeight));
-		beaconClockGlobalValueLabel.string = "Global Tempo:";
-		beaconClockGlobalTempoValueLabel = StaticText.new(beaconClockCompositeView,
-			Rect.new(pad, beaconClockGlobalValueLabel.bounds.bottom + pad,
-				bcWidth - (2 * pad), bcHeight));
-		beaconClockGlobalTempoValueLabel.string = "unknown";
-		beaconClockGlobalTempoValueLabel.align = \center;
 
 		defaultFont = Font.new(Font.defaultSansFace, fontSizePoints, false, false);
 		boldFont = Font.new(Font.defaultSansFace, fontSizePoints, true, false);
@@ -219,7 +237,6 @@ SCLOrkChat {
 		chatTextView.setString(text, currentStringSize, 0);
 		chatTextView.setStringColor(color, currentStringSize, text.size);
 		chatTextView.setFont(defaultFont, currentStringSize, text.size);
-		chatTextView.select(chatTextView.string.size, 0);
 	}
 
 	prAppendChatBold { | text |
@@ -227,7 +244,6 @@ SCLOrkChat {
 		chatTextView.setString(text, currentStringSize, 0);
 		chatTextView.setStringColor(Color.black, currentStringSize, text.size);
 		chatTextView.setFont(boldFont, currentStringSize, text.size);
-		chatTextView.select(chatTextView.string.size, 0);
 	}
 
 	prAppendChatItalics { | text |
@@ -235,90 +251,90 @@ SCLOrkChat {
 		chatTextView.setString(text, currentStringSize, 0);
 		chatTextView.setStringColor(Color.black, currentStringSize, text.size);
 		chatTextView.setFont(italicsFont, currentStringSize, text.size);
-		chatTextView.select(chatTextView.string.size, 0);
 	}
 
 	prConnectChatTextUpdateLogic {
 		chatTextQueue = List.new;
 		chatTextQueueSemaphore = Semaphore.new(1);
 
-		updateChatTextTask = Task.new({
-			while ({ true }, {
-				chatTextQueueSemaphore.wait;
-				while ({ chatTextQueue.size > 0 }, {
-					var chatTextElement, text, who, type, currentStringSize;
-					chatTextElement = chatTextQueue.pop;
-					// We can release the queue mutex for now, as we have some UI to render,
-					// no need to block other threads while we do that.
-					chatTextQueueSemaphore.signal;
-
-					text = chatTextElement[0];
-					who = chatTextElement[1];
-					type = chatTextElement[2];
-
-					switch (type,
-						\echo, {
-							this.prAppendChatColor(who ++ ": " ++ text ++ "\n", Color.gray);
-						},
-						\normal, {
-							this.prAppendChatBold(who ++ ": ");
-							this.prAppendChatColor(text ++ "\n", Color.black);
-						},
-						\system, {
-							this.prAppendChatItalics(text ++ "\n");
-						},
-						\director, {
-							this.prAppendChatColor(who ++ ": " ++ text ++ "\n", Color.green);
-						}
-					).value;
-
-					chatTextQueueSemaphore.wait;
-				});
+		updateChatTextTask = SkipJack.new({
+			chatTextQueueSemaphore.wait;
+			while ({ chatTextQueue.size > 0 }, {
+				var chatTextElement, text, who, type, currentStringSize;
+				chatTextElement = chatTextQueue.pop;
+				// We can release the queue mutex for now, as we have some UI to render,
+				// no need to block other threads while we do that.
 				chatTextQueueSemaphore.signal;
 
-				chatTextUpdatePeriodSeconds.wait;
+				text = chatTextElement[0];
+				who = chatTextElement[1];
+				type = chatTextElement[2];
+
+				switch (type,
+					\echo, {
+						this.prAppendChatColor(who ++ ": " ++ text ++ "\n", Color.gray);
+					},
+					\normal, {
+						this.prAppendChatBold(who ++ ": ");
+						this.prAppendChatColor(text ++ "\n", Color.black);
+					},
+					\system, {
+						this.prAppendChatItalics(text ++ "\n");
+					},
+					\director, {
+						this.prAppendChatColor(who ++ ": " ++ text ++ "\n", Color.green);
+					}
+				).value;
+
+				chatTextView.select(chatTextView.string.size, 0);
+
+				chatTextQueueSemaphore.wait;
 			});
-		}, AppClock).start;
+			chatTextQueueSemaphore.signal;
+		},
+		dt: chatTextUpdatePeriodSeconds,
+		stopTest: { quitTasks },
+		name: "ChatText",
+		clock: AppClock,
+		autostart: true);
 	}
 
 	prConnectPeerUpdateLogic {
-		updatePeersTask = Task.new({
-			var currentPeerSet, nextPeerSet, leavingPeerSet, arrivingPeerSet;
-			var peerChange;
-			currentPeerSet = Set.new;
+		updatePeersTask = SkipJack.new({
+			// Detect changes to our local set of Peers. We make one copy of addrBook at
+			// the beginning of the set arithmetic, to avoid missing a race around a peer
+			// leaving or arriving during the operations.
+			nextPeerSet = addrBook.onlinePeers.asSet;
+			leavingPeerSet = currentPeerSet - nextPeerSet;
+			arrivingPeerSet = nextPeerSet - currentPeerSet;
+			currentPeerSet = nextPeerSet;
+			peerChange = false;
 
-			while ({ true }, {
-				// Detect changes to our local set of Peers. We make one copy of addrBook at
-				// the beginning of the set arithmetic, to avoid missing a race around a peer
-				// leaving or arriving during the operations.
-				nextPeerSet = addrBook.onlinePeers.asSet;
-				leavingPeerSet = currentPeerSet - nextPeerSet;
-				arrivingPeerSet = nextPeerSet - currentPeerSet;
-				currentPeerSet = nextPeerSet;
-				peerChange = false;
+			// Make system announcements for each arrival and departure.
+			leavingPeerSet.do({ | peer |
+				peerChange = true;
+				this.prAddChatLine("User" + this.prHumanReadablePeer(peer) +
+					"has left the Hail.", nil, \system) });
+			arrivingPeerSet.do({ | peer |
+				peerChange = true;
+				this.prAddChatLine("User" + this.prHumanReadablePeer(peer) +
+					"has arrived in the Hail.", nil, \system) });
 
-				// Make system announcements for each arrival and departure.
-				leavingPeerSet.do({ | peer |
-					peerChange = true;
-					this.prAddChatLine("User" + this.prHumanReadablePeer(peer) +
-						"has left the Hail.", nil, \system) });
-				arrivingPeerSet.do({ | peer |
-					peerChange = true;
-					this.prAddChatLine("User" + this.prHumanReadablePeer(peer) +
-						"has arrived in the Hail.", nil, \system) });
-
-				if (peerChange, {
-					var peerList = SortedList.new(currentPeerSet.size);
-					currentPeerSet.do({ | peer |
-						peerList.add(this.prHumanReadablePeer(peer));
-					});
-					peerListView.items = peerList.asArray;
+			if (peerChange, {
+				var peerList = SortedList.new(currentPeerSet.size);
+				currentPeerSet.do({ | peer |
+					peerList.add(this.prHumanReadablePeer(peer));
 				});
-
-				// Wait to refresh the peer list again.
-				peerListUpdatePeriodSeconds.wait;
+				peerListView.items = peerList.asArray;
 			});
-		}, AppClock).start;
+			// Wait to refresh the peer list again.
+			peerListUpdatePeriodSeconds.wait;
+		},
+		dt: peerListUpdatePeriodSeconds,
+		stopTest: { quitTasks },
+		name: "PeerList",
+		clock: AppClock,
+		autostart: true);// Clock functions can return a value for automatic rescheduling.
 	}
 
 	prConnectChatterToUI {
@@ -385,6 +401,23 @@ SCLOrkChat {
 			(maxBeaconClockTempo - minBeaconClockTempo)));
 	}
 
+	prStartBeaconClock {
+		if (beaconClock.isNil, {
+			beaconClock = BeaconClock.new(addrBook);
+		});
+
+		beaconClock.play({
+			Task.new({
+				beaconClockTempoValueLabel.background = Color.new(1, 1, 1);
+				beaconClockTempoValueLabel.stringColor = Color.new(0, 0, 0);
+				0.1.wait;
+				beaconClockTempoValueLabel.background = Color.new(0, 0, 0);
+				beaconClockTempoValueLabel.stringColor = Color.new(1, 1, 1);
+			}, AppClock).start;
+			1;
+		});
+	}
+
 	prConnectBeaconClockToUI {
 		beaconClockTempoKnob.action = { | v |
 			beaconClockTempoKnobValueLabel.string =
@@ -404,12 +437,22 @@ SCLOrkChat {
 			beaconClock.warpTempo(this.prConvertKnobToTempo() / 60.0);
 		};
 
-		beaconClockTempoUpdateTask = Task.new({
-			while ({ true }, {
-				beaconClockGlobalTempoValueLabel.string =
-				(beaconClock.tempo * 60.0).asInteger.asString;
-				tempoUpdatePeriodSeconds.wait;
-			});
-		}, AppClock).start;
+		beaconClockStatusUpdateTask = SkipJack.new({
+				if (beaconClock.notNil, {
+					beaconClockTempoValueLabel.string =
+					(beaconClock.tempo * 60.0).asInteger.asString;
+				}, {
+					beaconClockTempoValueLabel.string = "stopped";
+				});
+		},
+		dt: tempoUpdatePeriodSeconds,
+		stopTest: { quitTasks },
+		name: "PeerList",
+		clock: AppClock,
+		autostart: true);
+
+		restartClockButton.action = { | v |
+			this.prStartBeaconClock();
+		};
 	}
 }
