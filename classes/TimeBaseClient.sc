@@ -47,7 +47,7 @@ TimeBaseClient {
 		setTimeBaseOscFunc = OSCFunc({ | msg, time, addr |
 			var diff, rtt, n;
 			diff = Float.from64Bits(msg[1], msg[2]);
-			rtt = Date.gmtime.rawSeconds - requestLastSent;
+			rtt = Main.elapsedTime - requestLastSent;
 			// Recompute means.
 			if (timeDiffs[sumIndex].notNil, {
 				timeDiffSum = timeDiffSum - timeDiffs[sumIndex];
@@ -68,7 +68,7 @@ TimeBaseClient {
 
 		quitTasks = false;
 		updateDiffTask = SkipJack.new({
-			requestLastSent = Date.gmtime.rawSeconds;
+			requestLastSent = Main.elapsedTime;
 			serverNetAddr.sendMsg(TimeBaseServer.defaultOscPath,
 				requestLastSent.high32Bits,
 				requestLastSent.low32Bits,
@@ -82,6 +82,10 @@ TimeBaseClient {
 		clock: SystemClock,
 		autostart: true
 		);
+	}
+
+	elapsedTime {
+		^(Main.elapsedTime + timeDiff);
 	}
 
 	free {

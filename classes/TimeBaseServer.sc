@@ -1,4 +1,4 @@
-// Clients send the server their current time as supplied by Date.gmtime.rawSeconds
+// Clients send the server their current time as supplied by Main.elapsedTime
 // and any previously computed diff.
 // Servers receive this and compute a diff from the client time by subtracting it
 // from their authoritative time stamp. The diff is then sent back to the client.
@@ -24,7 +24,7 @@ TimeBaseServer {
 
 		getTimeBaseOscFunc = OSCFunc({| msg, time, addr |
 			var serverTime, clientTime, clientPath, clientPort, timeDiff, returnAddr;
-			serverTime = Date.gmtime.rawSeconds + serverTestingOffset;
+			serverTime = Main.elapsedTime + serverTestingOffset;
 			clientTime = Float.from64Bits(msg[1], msg[2]);
 			clientPath = msg[3];
 			clientPort = msg[4];
