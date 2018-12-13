@@ -100,13 +100,19 @@ SCLOrkChat {
 		updatePeersTask.stop.free;
 		beaconClockStatusUpdateTask.stop.free;
 		window.close;
+		window = nil;
 
-		// Tear down Utopia Objects.
-		beaconClock.stop;
+		// Tear down Utopia Objects. TODO: fix me
+		/*
+		if (beaconClock.notNil, {
+			beaconClock.stop.free;
+			beaconClock = nil;
+		});
 		chatter.free;
 		hail.free;
 		addrBook.free;
 		me.free;
+		*/
 	}
 
 	// Given a Peer, convert to human readable string name.
@@ -161,7 +167,7 @@ SCLOrkChat {
 
 		window = Window.new(
 			"chat" + chatVersionString + "-" + this.prHumanReadablePeer(me),
-			Rect.new(Window.screenBounds.right - windowDefaultWidthPointMultiple * fontSizePoints, 0,
+			Rect.new(Window.screenBounds.right, 0,
 				windowDefaultWidthPointMultiple * fontSizePoints,
 				Window.screenBounds.height)
 		);
@@ -408,11 +414,13 @@ SCLOrkChat {
 
 		beaconClock.play({
 			Task.new({
-				beaconClockTempoValueLabel.background = Color.new(1, 1, 1);
-				beaconClockTempoValueLabel.stringColor = Color.new(0, 0, 0);
-				0.1.wait;
-				beaconClockTempoValueLabel.background = Color.new(0, 0, 0);
-				beaconClockTempoValueLabel.stringColor = Color.new(1, 1, 1);
+				if (window.notNil, {
+					beaconClockTempoValueLabel.background = Color.new(1, 1, 1);
+					beaconClockTempoValueLabel.stringColor = Color.new(0, 0, 0);
+					0.1.wait;
+					beaconClockTempoValueLabel.background = Color.new(0, 0, 0);
+					beaconClockTempoValueLabel.stringColor = Color.new(1, 1, 1);
+				});
 			}, AppClock).start;
 			1;
 		});

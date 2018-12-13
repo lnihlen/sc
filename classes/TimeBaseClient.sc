@@ -63,7 +63,6 @@ TimeBaseClient {
 			roundTripSum = roundTripSum + rtt;
 			timeDiff = timeDiffSum / n;
 			roundTripTime = roundTripSum / n;
-			"timeDiff: %, rtt: %".format(timeDiff, roundTripTime).postln;
 		}, oscPath, recvPort: oscPort).fix;
 
 		quitTasks = false;
@@ -82,10 +81,6 @@ TimeBaseClient {
 		clock: SystemClock,
 		autostart: true
 		);
-	}
-
-	elapsedTime {
-		^(Main.elapsedTime + timeDiff);
 	}
 
 	free {
