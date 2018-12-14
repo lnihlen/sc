@@ -1,7 +1,9 @@
 SyncTempoClock : Clock {
 	var timeBaseClient;
 	var <tempo = 1.0;
-	var scheduler;
+	var queue;
+	var schedulerTask;
+	var shouldQuit;
 
 	var <beatsPerBar = 4.0;
 	var <barsPerBeat = 0.25;
@@ -13,27 +15,18 @@ SyncTempoClock : Clock {
 	}
 
 	init {
-		scheduler = Scheduler.new(this, drift: false, recursive: false);
+		queue = PriorityQueue.new;
+
+		schedulerTask = Task.new({
+
+		}, SystemClock);
 	}
 
-	tick {
-		var saveClock = thisThread.clock;
-		thisThread.clock = this;
-		scheduler.seconds = this.seconds;
-		thisThread.clock = saveClock;
-
-		// Also scheduler is thinking in units of beats I think
-		if (scheduler.isEmpty, {
-			"tick empty".postln;
-			^nil;
-		}, {
-			"tick next: %".format(scheduler.queue.topPriority - timeBaseClient.timeDiff).postln;
-			^(scheduler.queue.topPriority - timeBaseClient.timeDiff)
-		});
+	stop {
 	}
 
 	clear {
-		scheduler.clear;
+		queue.clear;
 	}
 
 	elapsedBeats {
@@ -45,7 +38,7 @@ SyncTempoClock : Clock {
 	}
 
 	seconds {
-		^(thisThread.seconds + timeBaseClient.timeDiff);
+		^(Main.elapsedTime + timeBaseClient.timeDiff);
 	}
 
 	secs2beats { | secs |
@@ -57,15 +50,9 @@ SyncTempoClock : Clock {
 	}
 
 	sched { | delta, item |
-		var wasEmpty = scheduler.isEmpty;
-		scheduler.sched(delta, item);
-		if (wasEmpty, { SystemClock.play({ this.tick; }); });
 	}
 
 	schedAbs { | beat, item |
-		var wasEmpty = scheduler.isEmpty;
-		scheduler.schedAbs(beat, item);
-		if (wasEmpty, { SystemClock.play({ this.tick; }); });
 	}
 
 	nextTimeOnGrid { | quant = 1, phase = 0 |
