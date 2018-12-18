@@ -18,10 +18,4 @@ SyncTempoClock : TempoClock {
 			});
 		}, SystemClock).start;
 	}
-
-	// Override play to avoid the blast of events that can happen as this clock
-	// catches up with the remote clock, with a different time base.
-	play { | task, quant = 1 |
-		this.schedAbs(this.nextTimeOnGrid(quant), task);
-	}
 }
