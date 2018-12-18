@@ -25,15 +25,16 @@ Task.new({ "blah".postln; }, SystemClock).start;
 d.postln;
 )
 
-
-
 (
-~b = { "magotago".postln; ^1; };
-~a = fork {
-	var c = ~b.awake(100);
+~b = { "magotago".postln; thisThread.clock.postln; ^1; };
+~m = LogClock.new(1.0);
+~a = {
+	var c;
+	c = ~b.next(100);
 	c.postln;
 	^nil;
 };
+~m.play(~a);
 )
 
 ~a

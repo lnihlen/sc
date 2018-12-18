@@ -1,4 +1,99 @@
-SyncTempoClock : Clock {
+LogClock : TempoClock {
+	*new { | tempo, beats, seconds, queueSize=256 |
+		"LogClock::new".postln;
+		^super.new.init(tempo, beats, seconds, queueSize);
+	}
+	init { | tempo, beats, seconds, queueSize |
+		"LogClock::init".postln;
+		super.init(tempo, beats, seconds, queueSize);
+	}
+	stop {
+		"LogClock::stop".postln;
+		super.stop;
+	}
+	play { | task, quant = 1 |
+		"LogClock::play".postln;
+		super.play(task, quant);
+	}
+	playNextBar { | task |
+		"LogClock::playNextBar".postln;
+		super.playNextBar(task);
+	}
+	tempo {
+		"LogClock::tempo".postln;
+		^super.tempo;
+	}
+	beatDur {
+		"LogClock::beatDur".postln;
+		^super.beatDur;
+	}
+	elapsedBeats {
+		"LogClock::elapsedBeats".postln;
+		^super.elapsedBeats;
+	}
+	beats {
+		"LogClock::beats".postln;
+		^super.beats;
+	}
+	beats_ { | beats |
+		"LogClock::beats_".postln;
+		^super.beats_ = beats;
+	}
+	seconds {
+		"LogClock::seconds".postln;
+		^super.seconds;
+	}
+	sched { | delta, item |
+		"LogClock::sched".postln;
+		super.sched(delta, item);
+	}
+	schedAbs { | beat, item |
+		"LogClock::schedAbs".postln;
+		super.schedAbs(beat, item);
+	}
+	clear { | releaseNodes = true |
+		"LogClock::clear".postln;
+		^super.clear(releaseNodes);
+	}
+	etempo_ { | newTempo |
+		"LogClock::etempo_".postln;
+		^super.etempo_ = newTempo;
+	}
+	beats2secs { | beats |
+		"LogClock::beats2secs".postln;
+		^super.beats2secs(beats);
+	}
+	secs2beats { | secs |
+		"LogClock::secs2beats".postln;
+		^super.secs2beats(secs);
+	}
+	nextTimeOnGrid { | quant = 1, phase = 0 |
+		"LogClock::nextTimeOnGrid".postln;
+		^super.nextTimeOnGrid(quant, phase);
+	}
+	timeToNextBeat { | quant = 1.0 |
+		"LogClock::timeToNextBeat".postln;
+		^super.timeToNextBeat(quant);
+	}
+}
+
+SyncTempoClock : TempoClock {
+	var timeBaseClient;
+	var beatsSyncTask;
+
+	*new { | timeBase, tempo, beats, seconds, queueSize = 256 |
+		^super.new(tempo, beats, seconds, queueSize).setVars(timeBase);
+	}
+
+	setVars { | timeBase |
+		timeBaseClient = timeBase;
+		beatsSyncTask = new Task({
+
+		}, SystemClock).start;
+	}
+}
+
+OldSyncTempoClock : Clock {
 	const maxSleepInterval = 0.5;
 	const minSleepInterval = 0;
 	var timeBaseClient;
@@ -21,9 +116,13 @@ SyncTempoClock : Clock {
 		queue = PriorityQueue.new;
 		shouldQuit = false;
 		wakeup = { | item, beats, seconds |
-			var delta;
+			var delta, saveClock;
 			"wakeup: %, %, %".format(item, beats, seconds).postln;
+			saveClock = thisThread.clock;
+			thisThread.beats = beats;
+			thisThread.seconds = seconds;
 			delta = item.awake(beats, seconds, this);
+			thisThread.clock = saveClock;
 			delta.postln;
 			if (delta.isNumber, {
 				"repeat business".postln;
@@ -49,8 +148,7 @@ SyncTempoClock : Clock {
 					var beat, item;
 					beat = pair[0];
 					item = pair[1];
-					fork { wakeup.(item, beat, this.seconds); ^nil; };
-					"wakeup".postln;
+					wakeup.(item, beat, this.seconds);
 				});
 
 				expired.clear();
