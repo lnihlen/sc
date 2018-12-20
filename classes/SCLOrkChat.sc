@@ -15,7 +15,7 @@
 // '/chatSendMessage' -
 //   [ senderId, \recipients, recipientId0, ..., \message, type, contents ]
 //   Send a chat message. RecipientId can be 0 to send to all connected clients.
-//   Will send an \echo type message back to /chatRecieve on sending client.
+//   Will send an \echo type message back to /chatReceive on sending client.
 //
 // '/chatSignOut' - [ userId ]
 //   Tidy cleanup, server won't respond, but will remove user.
@@ -38,7 +38,7 @@ SCLOrkChatServer {
 //   Server updating state of one of the other clients. changeType is one of \add,
 //   \remove, or \rename.
 //
-// '/chatRecieve -
+// '/chatReceive -
 //    [ senderId, \recipients, recipientId0, .., \message, type, contents]
 //   Server sending a chat message from another client back. recipientId can be 0
 //   to indicate that this was a broadcast message.
@@ -56,7 +56,9 @@ SCLOrkChatClient {
 	var setAllClientsOscFunc;
 	var pongOscFunc;
 	var changeClientOscFunc;
-	var recieveOscFunc;
+	var receiveOscFunc;
+
+	var
 
 	*new { | nickName, serverNetAddr, oscPort |
 		^super.newCopyArgs(nickName, serverNetAddr, oscPort).init;
@@ -67,8 +69,8 @@ SCLOrkChatClient {
 		isConnected = false;
 
 		signInCompleteOscFunc = OSCFunc.new({ | msg, time, addr |
-			// Can double-check isConnected to be false here, throw
-			// error if recieving duplicate signInComplete message.
+			// TODO: Can double-check isConnected to be false here, throw
+			// error if receiving duplicate signInComplete message.
 			isConnected = true;
 			userId = msg[1];
 			// Send a request for a list of all connected clients,
@@ -86,16 +88,72 @@ SCLOrkChatClient {
 			userDictionary.clear;
 			num = msg[1];
 			msg.do({ | i, item |
-				if (i < 2, { continue; });
-				if (i % 2 == 0, {
-					id = item;
-				}, {
-					userDictionary.put(id, item);
+				if (i >= 2, {
+					if (i % 2 == 0, {
+						id = item;
+					}, {
+						userDictionary.put(id, item);
+					});
 				});
 			});
-			// Can double-check size and throw error if mismatch.
+			// TODO: Can double-check size and throw error if mismatch.
 		},
 		path: '/chatSetAllClients',
+		srcId: serverNetAddr,
+		recvPort: oscPort
+		);
+
+		pongOscFunc = OSCFunc.new({ | msg, time, addr |
+			var serverTimeout = msg[2];
+
+			// TODO: cmd-period survival - maybe just send
+			// a fresh ping?
+			SystemClock.sched(serverTimeout - 1, {
+				serverNetAddr.sendMsg('/chatPing', userId);
+			});
+		},
+		path: '/chatPong',
+		srcId: serverNetAddr,
+		recvPort: oscPort
+		);
+
+		changeClientOscFunc = OSCFunc.new({ | msg, time, addr |
+			var changeType, id, nickname;
+			changeType = msg[1];
+			id = msg[2];
+			nickname = msg[3];
+			switch (changeType,
+				\add, {
+					userDictionary.put(id, nickname);
+				},
+				\remove, {
+					userDictionary.removeAt(id);
+				},
+				\rename, {
+					userDictionary.put(id, nickname);
+				},
+				{ "unknown change ordered to client user dict.".postln; });
+		},
+		path: '/chatChangeClient',
+		srcId: serverNetAddr,
+		recvPort: oscPort
+		);
+
+		//    [ senderId, \recipients, recipientId0, .., \message, type, contents]
+		receiveOscFunc = OSCFunc.new({ | msg, time, addr |
+			var chatMessage, index;
+			chatMessage = ChatMessage.new;
+			index = 2;
+			chatMessage.senderId = msg[1];
+			chatMessage.recipientIds = Array.new(msg.size - 5);
+			while ({ msg[index] != \message }, {
+				chatMessage.recipientIds = chatMessage.recipientIds.add(msg[index]);
+				index = index + 1;
+			});
+			chatMessage.type = msg[index + 1];
+			chatMessage.contents = msg[index + 2];
+		},
+		path: '/chatReceive',
 		srcId: serverNetAddr,
 		recvPort: oscPort
 		);
@@ -108,7 +166,7 @@ SCLOrkChatClient {
 		setAllClientsOscFunc.free;
 		pongOscFunc.free;
 		changeClientOscFunc.free;
-		recieveOscFunc.free;
+		receiveOscFunc.free;
 	}
 
 	nickname_ { | newNick |
@@ -123,6 +181,9 @@ SCLOrkChatClient {
 ChatMessage {
 	// Server-assigned unique sender identifier.
 	var <>senderId;
+
+	// Array of recipient Ids, if [ 0 ] it's a broadcast message.
+	var <>recipientIds;
 
 	// One of:
 	//   \plain - normal chat message, broadcast
