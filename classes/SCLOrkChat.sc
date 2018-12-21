@@ -206,6 +206,11 @@ SCLOrkChatClient {
 	var changeClientOscFunc;
 	var receiveOscFunc;
 
+	// Callbacks, functions to be called when status changes.
+	var <>onConnected;  // called on connection status change with bool argument
+	var <>onMessageReceived;  // called with chatMessage object on receipt
+	var <>onUserChanged;  // called with user changes, type, userid, nickname.
+
 	*new { | nickName, serverNetAddr, listenPort = 7705 |
 		^super.newCopyArgs(nickName, serverNetAddr, listenPort).init;
 	}
@@ -213,6 +218,9 @@ SCLOrkChatClient {
 	init {
 		userDictionary = Dictionary.new;
 		isConnected = false;
+		onConnected = {};
+		onMessageReceived = {};
+		onUserChanged = {};
 
 		signInCompleteOscFunc = OSCFunc.new({ | msg, time, addr |
 			// TODO: Can double-check isConnected to be false here, throw
@@ -221,7 +229,7 @@ SCLOrkChatClient {
 			userId = msg[1];
 			// Send a request for a list of all connected clients,
 			// as well as our first ping message.
-			serverNetAddr.sendMsg('/chatGetAllClients', userId);
+			serverNetAddr.sendMsg('/chatGetAllClients', listenPort);
 			serverNetAddr.sendMsg('/chatPing', userId);
 		},
 		path: '/chatSignInComplete',
@@ -242,6 +250,10 @@ SCLOrkChatClient {
 				});
 			});
 			// TODO: Can double-check size and throw error if mismatch.
+
+			// We consider the client to be connected when it has both
+			// a valid userId and userDictionary.
+			onConnected.(true);
 		},
 		path: '/chatSetAllClients',
 		recvPort: listenPort
@@ -276,6 +288,8 @@ SCLOrkChatClient {
 					userDictionary.put(id, nickname);
 				},
 				{ "unknown change ordered to client user dict.".postln; });
+
+			onUserChanged.(changeType, id, nickname);
 		},
 		path: '/chatChangeClient',
 		recvPort: listenPort
@@ -285,22 +299,24 @@ SCLOrkChatClient {
 		receiveOscFunc = OSCFunc.new({ | msg, time, addr |
 			var chatMessage, index;
 			chatMessage = ChatMessage.new;
-			index = 2;
+			index = 3;
 			chatMessage.senderId = msg[1];
-			chatMessage.recipientIds = Array.new(msg.size - 5);
+			chatMessage.recipientIds = Array.new(msg.size - 6);
 			while ({ msg[index] != \message }, {
 				chatMessage.recipientIds = chatMessage.recipientIds.add(msg[index]);
 				index = index + 1;
 			});
 			chatMessage.type = msg[index + 1];
 			chatMessage.contents = msg[index + 2];
+
+			onMessageReceived.(chatMessage);
 		},
 		path: '/chatReceive',
 		recvPort: listenPort
 		);
+	}
 
-		// Now that handlers are set up we can send the sign-in message to
-		// the chat server, registering us for future callbacks.
+	connect {
 		serverNetAddr.sendMsg('/chatSignIn', nickName, listenPort);
 	}
 
@@ -319,6 +335,13 @@ SCLOrkChatClient {
 		// TODO
 	}
 
+	sendMessage { | chatMessage |
+		var message = ['/chatSendMessage', userId, \recipients] ++
+		chatMessage.recipientIds ++
+		[\message, chatMessage.type, chatMessage.contents];
+
+		serverNetAddr.sendRaw(message.asRawOSC);
+	}
 
 }
 
@@ -348,14 +371,14 @@ ChatMessage {
 	// Human-readable mapping of sender name, string. (not part of wire message)
 	var <>senderName;
 
-	*new {
-		^super.new.init;
+	*new { | senderId, recipientIds, type, contents, senderName = nil |
+		^super.newCopyArgs(senderId, recipientIds, type, contents, senderName);
 	}
 
-	init {
+	postln {
+		"senderId: %, recipientIds: %, type: %, contents: %, senderName: %".format(
+			senderId, recipientIds, type, contents, senderName).postln;
 	}
-
-	// TODO: toOscMessage;
 }
 
 ChatMessageView : View {

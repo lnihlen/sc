@@ -23,4 +23,13 @@ OSCFunc.trace(true);
 ~chatServer = SCLOrkChatServer.new;
 ~chatClient = SCLOrkChatClient.new("luken",
 	NetAddr.new("127.0.0.1", SCLOrkChatServer.defaultListenPort));
+~chatClient.onConnected = { | val |
+	var msg = ChatMessage.new(~chatClient.userId, [ 0 ], \plain,
+	"Test test test woohoo.", "luken");
+	~chatClient.sendMessage(msg);
+};
+~chatClient.onMessageReceived = { | msg |
+	msg.postln;
+};
+~chatClient.connect;
 )
