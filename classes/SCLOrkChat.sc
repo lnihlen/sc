@@ -3,7 +3,7 @@
 //   Registers a new client. Server will respond with an unique userId at
 //   /chatSignInComplete on provided port.
 //
-// '/chatGetAllClients' - [ userId ]
+// '/chatGetAllClients' - [ receivePort ]
 //   Will respond with a list of all signed in clients and their userId at
 //   /chatSetAllClients.
 //
@@ -17,10 +17,156 @@
 //   Send a chat message. RecipientId can be 0 to send to all connected clients.
 //   Will send an \echo type message back to /chatReceive on sending client.
 //
-// '/chatSignOut' - [ userId ]
+// '/chatChangeNickName' - [ userId, nickName ]
+//   Updates nickname to provided one. Will inform other clients at chatChangeClient.
+//
+// '/chatSignOut' - [ userId, receivePort ]
 //   Tidy cleanup, server won't respond, but will remove user.
 SCLOrkChatServer {
+	const <defaultListenPort = 7707;
+	const clientPingTimeout = 5.0;
 
+	var listenPort;
+
+	// Map of individual NetAddr objects to userIds.
+	var <userIdMap;
+	// Map of userIds to nicknames.
+	var <nickNameMap;
+	var userSerial;
+
+	var signInOscFunc;
+	var getAllClientsOscFunc;
+	var pingOscFunc;
+	var sendMessageOscFunc;
+	var changeNickNameOscFunc;
+	var signOutOscFunc;
+
+	*new { | listenPort = 7707 |
+		^super.newCopyArgs(listenPort).init;
+	}
+
+	init {
+		userIdMap = Dictionary.new;
+		nickNameMap = Dictionary.new;
+		userSerial = 0;
+
+		signInOscFunc = OSCFunc.new({ | msg, time, addr |
+			var nickName = msg[1];
+			var clientPort = msg[2];
+			var clientAddr = NetAddr.new(addr.ip, clientPort);
+			var userId = userIdMap.atFail(clientAddr, {
+				userSerial = userSerial + 1;
+				userSerial;
+			});
+			// Update user maps.
+			userIdMap.put(clientAddr, userId);
+			nickNameMap.put(userId, nickName);
+
+			clientAddr.sendMsg('/chatSignInComplete', userId);
+
+			// Send new client announcement to all connected clients.
+			this.prSendAll(this.prChangeClient(\add, userId, nickName));
+		},
+		path: '/chatSignIn',
+		recvPort: listenPort
+		);
+
+		getAllClientsOscFunc = OSCFunc.new({ | msg, time, addr |
+			var receivePort = msg[1];
+			var clientAddr = NetAddr.new(addr.ip, receivePort);
+			var clientArray = ['/chatSetAllClients',
+				nickNameMap.size] ++ nickNameMap.getPairs;
+			clientAddr.sendRaw(clientArray.asRawOSC);
+		},
+		path: '/chatGetAllClients',
+		recvPort: listenPort
+		);
+
+		pingOscFunc = OSCFunc.new({ | msg, time, addr |
+			/* TODO */
+		},
+		path: '/chatPing',
+		recvPort: listenPort
+		);
+
+		//   [ senderId, \recipients, recipientId0, ..., \message, type, contents ]
+		sendMessageOscFunc = OSCFunc.new({ | msg, time, addr |
+			var senderId, recipients, index, sendMessage;
+			senderId = msg[1];
+			recipients = Array.new(msg.size - 6);
+			index = 3;
+			while ({ msg[index] != \message }, {
+				recipients.add(msg[index]);
+				index = index + 1;
+			});
+			sendMessage = this.prChatMessage(
+				senderId, recipients, msg[index + 1], msg[index + 2]);
+			// If first recipient is 0 we send to all.
+			if (recipients[0] == 0, {
+				this.prSendAll(sendMessage);
+			}, {
+				recipients.do({ | userId, index |
+					userIdMap.at(userId).sendRaw(sendMessage);
+				});
+			});
+		},
+		path: '/chatSendMessage',
+		recvPort: listenPort
+		);
+
+		// '/chatChangeNickName' - [ userId, nickName ]
+		changeNickNameOscFunc = OSCFunc.new({ | msg, time, addr |
+			var userId, nickName;
+			userId = msg[1];
+			nickName = msg[2];
+			nickNameMap.put(userId, nickName);
+			this.prSendAll(this.prChangeClient(\rename, userId, nickName));
+		},
+		path: '/chatChangeNickName',
+		recvPort: listenPort
+		);
+
+		signOutOscFunc = OSCFunc.new({ | msg, time, addr |
+			var userId, receivePort, clientAddr;
+			userId = msg[1];
+			receivePort = msg[2];
+			clientAddr = NetAddr.new(addr.ip, receivePort);
+			userIdMap.remove(clientAddr);
+			nickNameMap.remove(userId);
+		},
+		path: '/chatSignOut',
+		recvPort: listenPort
+		);
+
+		^this;
+	}
+
+	prSendAll { | msgArray |
+		userIdMap.keys.do({ | clientAddr, index |
+			clientAddr.sendRaw(msgArray);
+		});
+	}
+
+	prChangeClient { | type, userId, nickName |
+		^['/chatChangeClient',
+			type,
+			userId,
+			nickName].asRawOSC;
+	}
+
+	prChatMessage { | senderId, recipients, type, contents  |
+		var message = Array.new(recipients.size + 6);
+		message.add('/chatReceive');
+		message.add(senderId);
+		message.add(\recipients);
+		recipients.do({ | recipient, index |
+			message.add(recipient);
+		});
+		message.add(\message);
+		message.add(type);
+		message.add(contents);
+		^message.asRawOSC;
+	}
 }
 
 // Client code. Sets up shop on a listening port, gets responses from the server.
@@ -44,9 +190,11 @@ SCLOrkChatServer {
 //   to indicate that this was a broadcast message.
 //
 SCLOrkChatClient {
+	const defaultListenPort = 7705;
+
 	var <nickName;  // self-assigned nickname, can be changed.
 	var serverNetAddr;
-	var oscPort;
+	var listenPort;
 
 	var <userDictionary;  // map of userIds to values.
 	var <isConnected;  // state of connection to server.
@@ -58,10 +206,8 @@ SCLOrkChatClient {
 	var changeClientOscFunc;
 	var receiveOscFunc;
 
-	var
-
-	*new { | nickName, serverNetAddr, oscPort |
-		^super.newCopyArgs(nickName, serverNetAddr, oscPort).init;
+	*new { | nickName, serverNetAddr, listenPort = 7705 |
+		^super.newCopyArgs(nickName, serverNetAddr, listenPort).init;
 	}
 
 	init {
@@ -79,8 +225,7 @@ SCLOrkChatClient {
 			serverNetAddr.sendMsg('/chatPing', userId);
 		},
 		path: '/chatSignInComplete',
-		srcID: serverNetAddr,
-		recvPort: oscPort
+		recvPort: listenPort
 		);
 
 		setAllClientsOscFunc = OSCFunc.new({ | msg, time, addr |
@@ -99,8 +244,7 @@ SCLOrkChatClient {
 			// TODO: Can double-check size and throw error if mismatch.
 		},
 		path: '/chatSetAllClients',
-		srcId: serverNetAddr,
-		recvPort: oscPort
+		recvPort: listenPort
 		);
 
 		pongOscFunc = OSCFunc.new({ | msg, time, addr |
@@ -113,8 +257,7 @@ SCLOrkChatClient {
 			});
 		},
 		path: '/chatPong',
-		srcId: serverNetAddr,
-		recvPort: oscPort
+		recvPort: listenPort
 		);
 
 		changeClientOscFunc = OSCFunc.new({ | msg, time, addr |
@@ -135,8 +278,7 @@ SCLOrkChatClient {
 				{ "unknown change ordered to client user dict.".postln; });
 		},
 		path: '/chatChangeClient',
-		srcId: serverNetAddr,
-		recvPort: oscPort
+		recvPort: listenPort
 		);
 
 		//    [ senderId, \recipients, recipientId0, .., \message, type, contents]
@@ -154,13 +296,16 @@ SCLOrkChatClient {
 			chatMessage.contents = msg[index + 2];
 		},
 		path: '/chatReceive',
-		srcId: serverNetAddr,
-		recvPort: oscPort
+		recvPort: listenPort
 		);
+
+		// Now that handlers are set up we can send the sign-in message to
+		// the chat server, registering us for future callbacks.
+		serverNetAddr.sendMsg('/chatSignIn', nickName, listenPort);
 	}
 
 	free {
-		serverNetAddr.sendMsg('/chatSignOut', userId);
+		serverNetAddr.sendMsg('/chatSignOut', userId, listenPort);
 
 		signInCompleteOscFunc.free;
 		setAllClientsOscFunc.free;
@@ -170,9 +315,11 @@ SCLOrkChatClient {
 	}
 
 	nickname_ { | newNick |
-
 		nickName = newNick;
+		// TODO
 	}
+
+
 }
 
 

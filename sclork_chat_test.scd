@@ -17,3 +17,10 @@ We had a work holiday party for just the Movies team, and it was cool to bring +
 	^3;
 });
 )
+
+(
+OSCFunc.trace(true);
+~chatServer = SCLOrkChatServer.new;
+~chatClient = SCLOrkChatClient.new("luken",
+	NetAddr.new("127.0.0.1", SCLOrkChatServer.defaultListenPort));
+)
