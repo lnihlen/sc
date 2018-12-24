@@ -31,5 +31,9 @@ OSCFunc.trace(true);
 ~chatClient.onMessageReceived = { | msg |
 	msg.postln;
 };
+~chatClient.onUserChanged = { | type, userId, nickName |
+	[ "userChange:", type, userId, nickName ].postln;
+};
 ~chatClient.connect;
 )
+QuarksGui.new
