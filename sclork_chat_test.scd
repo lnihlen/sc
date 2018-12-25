@@ -1,30 +1,44 @@
 (
-~sc = SCLOrkChat.new("Luke");
+OSCFunc.trace(false);
+~longString = "I had a bit of time today to work on setting up the studio, enough so that I could get the computer going and make some noise with the modular synth gear I have plus supercollider. Then it was time to dig in to the sclork homework. I made my first Quark repository, for the SCLOrkChat program. One of the things I had noticed was that I was building up increasingly large comment blocks at the top of each object, so learning the syntax of the Supercollider help files";
+~shorty = "s";
+~chatServer = SCLOrkChatServer.new;
+~uiChatClient = SCLOrkChatClient.new(
+	NetAddr.new("127.0.0.1", SCLOrkChatServer.defaultListenPort));
+~uiChatClient.onConnected = {
+	~botChatClient = SCLOrkChatClient.new(
+		NetAddr.new("127.0.0.1", SCLOrkChatServer.defaultListenPort), 7709);
+	~botChatClient.onConnected = {
+		SystemClock.play({
+			var len = ~longString.size.rand;
+			~botChatClient.sendMessage(SCLOrkChatMessage.new(
+				~botChatClient.userId, [ 0 ], \plain, ~longString[..len]));
+			^5;
+		});
+		SystemClock.play({
+			~botChatClient.sendMessage(SCLOrkChatMessage.new(
+				~botChatClient.userId, [ 0 ], \plain, ~shorty));
+			^10.rand;
+		});
+	};
+	~botChatClient.connect("bot");
+};
+~sclorkChat = SCLOrkChat.new("Luke", false, ~uiChatClient);
+)
 
-SystemClock.play({
-	var msg = ChatMessage.new;
-	msg.type = \plain;
-	msg.senderId = 0;
-	msg.senderName = "Ligetty";
-	msg.contents = "Spent a sort of frustrating, unproductive day up on Santa Clara University campus working on sclork code. Unfortunately I ran against a bug in my network timing code pretty hard for most of the day. Then my laptop crashed in a creative and interesting way, requiring me to literally unplug it and let the battery run down to empty in order to recover it. Since it was only about 15 minutes until the end of the hack session that kind of just put the cherry on the top of the poo pile so I packed it up.
-
-The problem I’m encountering when trying to make my own clock is that the items that I am scheduling, when it’s time to have them execute, I’m supposed to call the awake method, but this method typically yields a value with the ^ operator. I’m running my tasks on the SystemClock and so the yield is treated like an argument to SystemClock asking for a reschedule there instead of on my clock. I don’t know how to intercept those values, and can’t seem to find any reason why the code in Clock.sc works and my code doesn’t.
-
-The less awesome (but perhaps honestly better) solution is to kind of follow the BeaconClock pattern by inheriting from TempoClock and then periodically adjusting the beats value on the parent object to reflect the remote clock.
-
-We had a work holiday party for just the Movies team, and it was cool to bring +1s so Hilary drove over the hill and met me there. It was a good reminder of the fact that I genuinely like everyone on my current team. Super chill, friendly party. We left early because that’s how I roll at parties but I left feeling lucky to work with so many excellent people.";
-	~sc.prEnqueueChatMessage(msg);
-	^3;
-});
+(
+var len;
+len = ~longString.size.rand;
+len.postln;
 )
 
 (
 OSCFunc.trace(true);
 ~chatServer = SCLOrkChatServer.new;
-~chatClient = SCLOrkChatClient.new("luken",
+~chatClient = SCLOrkChatClient.new(
 	NetAddr.new("127.0.0.1", SCLOrkChatServer.defaultListenPort));
 ~chatClient.onConnected = { | val |
-	var msg = ChatMessage.new(~chatClient.userId, [ 0 ], \plain,
+	var msg = SCLOrkChatMessage.new(~chatClient.userId, [ 0 ], \plain,
 	"Test test test woohoo.", "luken");
 	~chatClient.sendMessage(msg);
 };
@@ -34,6 +48,6 @@ OSCFunc.trace(true);
 ~chatClient.onUserChanged = { | type, userId, nickName |
 	[ "userChange:", type, userId, nickName ].postln;
 };
-~chatClient.connect;
+~chatClient.connect("luken");
 )
 QuarksGui.new
