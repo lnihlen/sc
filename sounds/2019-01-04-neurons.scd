@@ -1,25 +1,28 @@
 // 2019-01-04 - first attempt, not really anywhere near what I'm hearing in my head.
+//
+// 2019-01-05 - Continued work. Thinking of two sounds for inspiration, the first is
+// the sound of steam escaping wet firewood when burning, the second is packing
+// styrofoam compressing or rubbing against other styrofoam pieces.
 
 // Neurons - This is a sound I hear sometimes in my head when it is very very quiet.
 // I have come to think, for no reason, that it is the sound of neurons firing in
 // my nervous system.
 
-{ XLine.kr(start: 1.0, end: 2.0, dur: 1.0); }.plot(1.0);
-
 (
 {
-	var env = Env.perc(
-		attackTime: 0.01,
-		releaseTime: 0.5,
-		level: 1.0,
-		curve: -4.0);
+	var env =
+	Env.new(
+		levels: [ 0, 1, 1, 0],
+		times: [0.01, 0.01, 0.01, 0.01, 0.01],
+		curve: \sine
+	);
 	var trigger = Impulse.ar(
-		XLine.kr(1.5, 10, 8, doneAction: 2);
+		LFGauss.kr(duration: 8, width: 0.45) * 15
 	);
 	var envgen = EnvGen.ar(env, trigger);
-
-	Pan2.ar(Saw.ar(
-		XLine.kr(50.0, 440.0, 8.0, doneAction: 2)
-	) * envgen, 0.0, 1.0);
+	var pitch = (LFGauss.kr(duration: 8, width: 0.75, doneAction: 2) * 180.0) + 30.0;
+	var sound = SinOsc.ar(pitch) * envgen;
+	sound = BPF.ar(sound, 1000.0, mul: 0.5);
+	Pan2.ar(sound, 0.0, 1.0);
 }.play;
 )
